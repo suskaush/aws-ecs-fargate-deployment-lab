@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Secure GitHub Actions and Amazon ECR foundation for the AWS-DEPLOYMENT lab
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  ApplicationRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: aws-ecs-fargate-deployment-lab
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-actions-aws-ecs-fargate-deployment-lab
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: repo:suskaush/aws-ecs-fargate-deployment-lab:ref:refs/heads/main
+
+      Policies:
+        - PolicyName: PushImagesToThisRepositoryOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:BatchGetImage
+                Resource: !GetAtt ApplicationRepository.Arn
+
+Outputs:
+  EcrRepositoryUri:
+    Description: URI used by GitHub Actions when pushing container images
+    Value: !GetAtt ApplicationRepository.RepositoryUri
+
+  GitHubActionsRoleArn:
+    Description: IAM role that GitHub Actions can assume from the main branch only
+    Value: !GetAtt GitHubActionsDeployRole.Arn
